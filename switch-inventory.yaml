@@ -44,7 +44,7 @@ all:
         ios_size:                26788864
       
   vars:  
-    precheck_path:            ~/switch/backups/
-    postcheck_path:           ~/switch/checks/
+    precheck_path:            ~/switches/checks/
+    postcheck_path:           ~/switches/checks/
     backup_path:              ~/switches/backups/
     ios_image_path:           ~/switches/images/
