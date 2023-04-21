@@ -12,10 +12,10 @@ all:
   children:
     cisco:
       hosts:
-        873EDV:
-        874EDV:
-        875EDV:
-        876EDV:
+        Switch01:
+        Switch02:
+        Switch03:
+        Switch04:
       vars:
         ansible_network_os:      ios
         ansible_connection:      network_cli
