@@ -34,7 +34,7 @@ all:
         ios_md5:                 3d48e338198b3c892537634c772be491
         ios_size:                22966272
     c2960x:
-      host:
+      hosts:
         Switch02:
         Switch04:
       vars:
