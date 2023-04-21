@@ -1,0 +1,50 @@
+all:
+  hosts:
+    Switch01:
+      ansible_host: 10.1.10.101
+    Switch02:
+      ansible_host: 10.1.10.102
+    Switch03:
+      ansible_host: 10.1.10.103
+    Switch04:
+      ansible_host: 10.1.10.104
+
+  children:
+    cisco:
+      hosts:
+        873EDV:
+        874EDV:
+        875EDV:
+        876EDV:
+      vars:
+        ansible_network_os:      ios
+        ansible_connection:      network_cli
+        ansible_become:          yes
+        ansible_become_method:   enable
+        ansible_become_password: cisco
+        ansible_ssh_user:        admin
+        ansible_ssh_pass:        cisco
+    c3560cx:
+      hosts:
+        Switch01:
+        Switch03:
+      vars:
+        ios_version:             15.2(7)E8
+        ios_binary:              c3560cx-universalk9-mz.152-7.E8.bin
+        ios_md5:                 3d48e338198b3c892537634c772be491
+        ios_size:                22966272
+    c2960x:
+      host:
+        Switch02:
+        Switch04:
+      vars:
+        ios_version:             15.2(7)E7
+        ios_binary:              c2960x-universalk9-mz.152-7.E7.bin
+        ios_md5:                 1b3781db619dcce6a2677628acc15439
+        ios_size:                26788864
+      
+  vars:  
+    precheck_path:            ~/switch/backups/
+    postcheck_path:           ~/switch/checks/
+    backup_path:              ~/switches/backups/
+    ios_image_path:           ~/switches/images/
