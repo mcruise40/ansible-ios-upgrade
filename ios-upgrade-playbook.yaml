@@ -1,0 +1,193 @@
+---
+# Ansible Playbook to upgrade Cisco IOS. Created by Andy Kruesi, Ceruno AG
+#
+# sources to build this script
+# URL1: https://www.networkgalaxy.org/2020/12/ansible-playbook-for-network-os-upgrade.html
+# URL2: https://www.digitalocean.com/community/tutorials/how-to-use-variables-in-ansible-playbooks
+# URL3: https://www.rogerperkin.co.uk/network-automation/ansible/cisco-ios-upgrade-for-switch/
+# URL4: https://blog.sys4.de/ansible-upgrade-ios-en.html
+
+- name: Upgrade Cisco IOS
+
+  ## Create backup folder for today 
+  hosts: localhost
+  tasks:
+
+   - name: Get ansible date/time facts
+     setup:
+       filter: "ansible_date_time"
+       gather_subset: "!all"
+
+   - name: Store DTG as fact
+     set_fact:
+       DTG: "{{ ansible_date_time.date }}"
+
+   - name: Create Directory {{hostvars.localhost.DTG}}
+     file:
+       path: "{{ backup_path }}{{hostvars.localhost.DTG}}"
+       state: directory
+  run_once: true
+
+
+- hosts: cisco
+  tasks:
+
+    - name: Checking current IOS version
+      ios_facts:
+        gather_subset: hardware
+
+    - name: Comparing installed and exptected IOS version
+      debug:
+        msg:
+        -  "Curent version is {{ ansible_net_version}}"
+        -  "Compliant image is {{ ios_version }}"
+
+    - name: Deciding whether the IOS will be upgraded or not
+      debug:
+        msg: "{% if ansible_net_version == ios_version %} Current IOS version is up to date. Upgrade would be skipped for this host {% else %} Current Image version is different than the upgrade image and will be upgraded {% endif %}"
+
+    - name: End the play for the host if device os version is up to date
+      meta: end_host
+      when: ansible_net_version == ios_version
+
+    - name: Asset that there is enough flash space for upload
+      assert:
+        that:
+          - ansible_net_filesystems_info['flash:']['spacefree_kb'] > ({{ ios_size }}/1024)
+        msg: "There is not enough space left on the device's flash"
+      tags:
+        - flash
+
+#   - name: Render a Jinja2 template onto an IOS device
+#     cisco.ios.ios_config:
+#       backup: yes
+#       src: ios_template.j2
+
+#   - name: Configurable backup path
+#     cisco.ios.ios_config:
+#       src: ios_template.j2
+#       backup: yes
+#       backup_options:
+#         filename: "{{ inventory_hostname }}-{{ hostvars.localhost.DTG }}-config.txt"
+#         dir_path: "{{ backup_path }}"
+
+    - name: Backup Running Config 
+      ios_command:
+        commands: show run  
+      register: config
+
+    - name: Save output to {{ backup_path }}
+      copy:
+        content: "{{config.stdout[0]}}"
+        dest: "{{ backup_path }}{{hostvars.localhost.DTG}}/{{ inventory_hostname }}-{{hostvars.localhost.DTG}}-config.txt"
+
+    - name: Writing Memory on device
+      ios_config:
+        save_when: always
+
+    - name: Reading 'show ip route' ouput
+      cli_command:
+        command: show ip route
+      register: ip_route_pre
+
+    - name: Copying 'show ip route' ouput to local file
+      copy:
+        content: "{{ ip_route_pre.stdout }}"
+        dest: "{{ precheck_path }}{{ inventory_hostname }}_route-precheck"
+
+    - name: Reading 'show ip interface brief' ouput
+      cli_command:
+        command: show ip interface brief
+      register: interface_ip_pre
+     
+    - name: Copying 'show ip interface brief' ouput to local file
+      copy:
+        content: "{{ interface_ip_pre.stdout }}"
+        dest: "{{ precheck_path }}{{ inventory_hostname }}_interface-ip-precheck"
+
+    - name: Copy Image // This could take up to 4 minutes
+      net_put:
+        src: "{{ ios_image_path }}{{ ios_binary }}"
+        dest: "flash:/{{ ios_binary }}"
+      vars:
+        ansible_command_timeout: 600
+
+    - name: Check md5sum of IOS on device
+      ios_command:
+        commands:
+          - command: 'verify /md5 flash:{{ ios_binary }} {{ ios_md5 }}'
+      register: md5_output
+
+    - name: Continue if hash matches
+      block:
+
+      - name: Change Boot Variable to new image 
+        ios_config: 
+          commands: 
+            - "boot system flash:/{{ ios_binary }}"
+          save_when: always 
+
+      - name: Reloading the Device
+        cli_command:
+          command: "reload"
+          check_all: True
+          prompt:
+            - "Save?"
+            - "reload?"
+            - "confirm"
+          answer:
+            - 'yes'
+            - 'yes'
+            - 'y'
+        
+      - name: reset the connection
+        meta: reset_connection
+
+      - name: wait for network device to come back up
+        wait_for_connection:
+          delay: 100
+          connect_timeout: 1200 
+
+      - name: Checking current IOS version
+        ios_facts:
+          gather_subset: hardware
+
+      - name: Comparing Installed and Expected IOS version
+        debug:
+          msg:
+            -  Expected image after the upgrade is {{ ios_version }}
+            -  Current version is {{ ansible_net_version }}
+
+      - name: Reading 'show ip route' ouput
+        cli_command:
+          command: show ip route
+        register: ip_route_post
+      
+      - name: Copying 'show ip route' ouput to local file
+        copy:
+          content: "{{ ip_route_post.stdout }}"
+          dest: "{{ postcheck_path }}/{{ inventory_hostname }}_route-postcheck"
+
+      - name: Reading 'show ip interface brief' ouput
+        cli_command:
+          command: show ip interface brief
+        register: interface_ip_post
+      
+      - name: Copying 'show ip interface brief' ouput to local file
+        copy:
+          content: "{{ interface_ip_post.stdout }}"
+          dest: "{{ postcheck_path }}{{ inventory_hostname }}_interface-ip-postcheck"
+
+      - name: Comparing pre and post routes
+        copy:
+          src: "{{ postcheck_path }}{{ inventory_hostname }}_route-postcheck"
+          dest: "{{ precheck_path }}{{ inventory_hostname }}_route-precheck"
+        check_mode: yes
+        diff: yes
+
+      - name: Comparing pre and post interface IP
+        copy:
+          src: "{{ postcheck_path }}{{ inventory_hostname }}_interface-ip-postcheck"
+          dest: "{{ precheck_path }}{( inventory_hostname }}_interface-ip-precheck"
+        check_mode: yes
+        diff: yes
